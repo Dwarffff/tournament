@@ -1,0 +1,70 @@
+title="My tournament"
+output_dir="out"
+
+if [ -f config.rc ]; then
+  . config.rc
+fi
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -t) shift
+        title="$1"
+        shift
+        ;;
+    -o) shift
+        output_dir="$1"
+        shift
+        ;;
+    -*)
+        echo "Unknown option: $1"
+        exit 1
+        ;;
+  esac
+done
+
+mkdir -p "$output_dir"
+temp_dir=$(mktemp -d)
+
+for task_dir in tasks/*; do
+  task_name=$(basename "$task_dir")
+  if [ -f "$task_dir/meta.rc" ]; then
+    . "$task_dir/meta.rc"
+    task_name="$name"
+  fi
+
+  for log_file in "$task_dir"/*.log.gz; do
+    team_name=$(basename "$log_file" .log.gz)
+    team_dir="$output_dir/team-$team_name"
+    mkdir -p "$team_dir"
+    gunzip -c "$log_file" > "$team_dir/$task_name.log"
+    pass_count=$(grep -c "^pass " "$team_dir/$task_name.log")
+    fail_count=$(grep -c "^fail " "$team_dir/$task_name.log")
+
+    echo "$task_name $pass_count $fail_count" >> "$temp_dir/$team_name"
+  done
+done
+
+echo "# $title" > "$output_dir/index.md"
+
+for team_file in "$temp_dir"/*; do
+  team_name=$(basename "$team_file")
+  total_points=0
+  echo "# Team $team_name" > "$output_dir/team-$team_name/index.md"
+  echo "| Task | Passed | Failed | Links |" >> "$output_dir/team-$team_name/index.md"
+  echo "|------|--------|--------|-------|" >> "$output_dir/team-$team_name/index.md"
+
+  while read task pass fail; do
+    echo "| $task | $pass | $fail | [Complete log]($task.log) |" >> "$output_dir/team-$team_name/index.md"
+    total_points=$((total_points + pass))
+  done < "$team_file"
+
+  echo "$team_name $total_points" >> "$temp_dir/scores"
+done
+
+sort -k2,2nr "$temp_dir/scores" | while read team_name points; do
+  echo "$team_name ($points points)" >> "$output_dir/index.md"
+done
+
+rm -rf "$temp_dir"
+
+exit 0
